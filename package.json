@@ -1,0 +1,14 @@
+{
+  "name": "eczane-pusula-veri",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Nöbetçi eczane listelerini günde birkaç kez toplayıp statik JSON olarak yayınlar.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "guncelle": "node src/run.mjs --out public",
+    "test": "node test/run-tests.mjs"
+  }
+}
