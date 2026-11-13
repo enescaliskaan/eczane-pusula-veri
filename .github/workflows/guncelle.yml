@@ -1,0 +1,62 @@
+name: Nöbetçi eczane verisini güncelle
+
+on:
+  schedule:
+    # GitHub saatleri UTC'dir (Türkiye = UTC+3). Tam saatlerde kuyruk olduğu için dakikalar kaydırıldı.
+    - cron: '47 5 * * *'   # 08:47 — sabah nöbet değişimi
+    - cron: '12 6 * * *'   # 09:12 — geç yayınlayan iller için tekrar
+    - cron: '37 16 * * *'  # 19:37 — akşam düzeltmeleri + yarının listesi
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Yalnızca bu iller (plaka, virgülle; boş = hepsi)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: veri-guncelle
+  cancel-in-progress: false
+
+jobs:
+  guncelle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Önceki veriyi al (gh-pages)
+        run: |
+          git clone --depth 1 --branch gh-pages "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" public \
+            || mkdir -p public
+          rm -rf public/.git
+
+      - name: Testler
+        run: node test/run-tests.mjs
+
+      - name: Veriyi topla
+        env:
+          NOSY_API_KEY: ${{ secrets.NOSY_API_KEY }}
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+        run: |
+          ONLY_ARG=""
+          if [ -n "${{ github.event.inputs.only }}" ]; then ONLY_ARG="--only ${{ github.event.inputs.only }}"; fi
+          node src/run.mjs --out public $ONLY_ARG
+
+      - name: Yayınla (gh-pages)
+        if: always()
+        run: |
+          [ -f public/v1/index.json ] || exit 0
+          cd public
+          git init -q -b gh-pages
+          git config user.name "eczane-pusula-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Veri güncellemesi $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
