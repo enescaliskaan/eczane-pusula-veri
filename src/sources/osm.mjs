@@ -42,12 +42,17 @@ async function overpass(query, timeoutMs) {
   let lastError;
   for (const endpoint of ENDPOINTS) {
     try {
-      return await getJson(endpoint, {
+      const json = await getJson(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', 'User-Agent': UA },
         body: `data=${encodeURIComponent(query)}`,
         timeoutMs,
       });
+      // Overpass zaman aşımında bile HTTP 200 + "remark" ile eksik sonuç döndürebilir
+      if (typeof json.remark === 'string' && /error|timed out|out of memory/i.test(json.remark)) {
+        throw new Error(`Overpass: ${json.remark.slice(0, 120)}`);
+      }
+      return json;
     } catch (e) {
       lastError = e;
       await sleep(4000);
@@ -60,7 +65,9 @@ async function overpass(query, timeoutMs) {
 export async function fetchOsmProvince(province) {
   const query = `[out:json][timeout:90];area["ISO3166-2"="${province.iso}"]->.a;(node["amenity"="pharmacy"](area.a);way["amenity"="pharmacy"](area.a););out center tags;`;
   const json = await overpass(query, 100_000);
-  return (json.elements ?? []).map(toRow).filter(Boolean);
+  const rows = (json.elements ?? []).map(toRow).filter(Boolean);
+  if (rows.length === 0) throw new Error('boş sonuç (dosya değiştirilmedi)');
+  return rows;
 }
 
 /**
