@@ -4,7 +4,7 @@ import { ensurePharmacyName, uniqueJoin } from '../osm-util.mjs';
 import { cleanPhone } from '../text.mjs';
 import { sleep } from '../time.mjs';
 
-const ENDPOINTS = (process.env.OVERPASS_URLS ?? 'https://overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter')
+const ENDPOINTS = (process.env.OVERPASS_URLS ?? 'https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter,https://maps.mail.ru/osm/tools/overpass/api/interpreter')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
@@ -24,7 +24,7 @@ export async function fetchOsmProvince(province) {
     try {
       const json = await getJson(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
         body: `data=${encodeURIComponent(query)}`,
         timeoutMs: 200_000,
       });

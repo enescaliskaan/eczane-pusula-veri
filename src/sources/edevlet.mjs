@@ -1,8 +1,8 @@
 // Resmî kaynak: e-Devlet "TİTCK - Nöbetçi Eczane Sorgulama"
 // Veriyi TEB bildirir, il sağlık müdürlükleri onaylar.
 import { extractCoords, parseTables, stripTags } from '../html.mjs';
-import { cleanPhone, cleanSpaces, normalizeTr, titleCaseTr } from '../text.mjs';
-import { addDays, edevletDate, parseTrDateTime } from '../time.mjs';
+import { cleanSpaces, extractPhone, normalizeTr, prettyAddress, titleCaseTr } from '../text.mjs';
+import { addDays, edevletDate, findDateTimes, parseTrDateTime } from '../time.mjs';
 
 export const EDEVLET_URL =
   process.env.EDEVLET_URL ?? 'https://www.turkiye.gov.tr/saglik-titck-nobetci-eczane-sorgulama';
@@ -102,13 +102,21 @@ export function parseEdevletResult(html, { dateKey, ilName }) {
       dutyStart = undefined;
       dutyEnd = undefined;
     }
+    // Saatler ayrı sütunda değilse (ör. telefon hücresine yapışık) satırın tamamında ara
+    if (!dutyStart || !dutyEnd) {
+      const found = findDateTimes(row.cells.map((c) => c.text).join(' | '));
+      if (found.length >= 2 && Date.parse(found[1]) > Date.parse(found[0])) {
+        dutyStart = found[0];
+        dutyEnd = found[1];
+      }
+    }
 
     const coords = extractCoords(row.html);
     pharmacies.push({
       name,
       district: titleCaseTr(cell('district')) || undefined,
-      address: cell('address'),
-      phone: cleanPhone(cell('phone')),
+      address: prettyAddress(cell('address')),
+      phone: extractPhone(cell('phone')),
       directions: cell('directions') || undefined,
       lat: coords?.[0],
       lon: coords?.[1],
