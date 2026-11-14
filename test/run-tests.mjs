@@ -42,6 +42,19 @@ const RESULT_TABLE = `
 <tr><td>ÜSKÜDAR</td><td>HAYAT ECZANESİ</td><td>Mimar Sinan Mah. No:1 &amp; 2</td><td>02163334455</td><td>13.11.2026 09:00</td><td>14.11.2026 09:00</td></tr>
 </tbody></table></div>`;
 
+const overpassCalls = [];
+const OVERPASS_TR = {
+  elements: [
+    { type: 'area', id: 3600223399, tags: { name: 'İstanbul', 'ISO3166-2': 'TR-34' } },
+    { type: 'node', id: 1, lat: 40.98712, lon: 29.02621, tags: { amenity: 'pharmacy', name: 'Şifa Eczanesi', 'addr:district': 'Kadıköy' } },
+    { type: 'way', id: 2, center: { lat: 41.02, lon: 29.01 }, tags: { amenity: 'pharmacy', name: 'Hayat', phone: '+90 216 333 44 55' } },
+    { type: 'area', id: 3600223400, tags: { name: 'Manisa', 'ISO3166-2': 'TR-45' } },
+    { type: 'node', id: 3, lat: 38.614, lon: 27.43, tags: { amenity: 'pharmacy', name: 'Hilal Eczanesi' } },
+    { type: 'area', id: 3600000001, tags: { name: 'Bölge', 'ISO3166-2': 'TR-XYZ' } },
+    { type: 'node', id: 4, lat: 39, lon: 30, tags: { amenity: 'pharmacy', name: 'Atlanmalı' } },
+  ],
+};
+
 function startServer() {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -53,6 +66,17 @@ function startServer() {
           { ADI: 'DENİZ ECZANESİ', BOLGE: 'KONAK', ADRES: 'Alsancak', TELEFON: '2324445566', LOKASYON_X: 27.1428, LOKASYON_Y: 38.4237, TARIH: '2026-11-13T00:00:00' },
         ]),
       );
+      return;
+    }
+    if (url.pathname === '/overpass') {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        const q = new URLSearchParams(body).get('data') ?? '';
+        overpassCalls.push(q.includes('foreach') ? 'tr' : 'il');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(OVERPASS_TR));
+      });
       return;
     }
     if (url.pathname !== '/nobetci') {
@@ -232,6 +256,40 @@ await test('koordinat: OSM eşleştirme + önbellek', async () => {
   assert.equal(s2.cache, 1);
 });
 
+await test('OSM: tüm Türkiye tek sorgu → il il ayırma', async () => {
+  const { splitNationwide } = await import('../src/sources/osm.mjs');
+  const m = splitNationwide(OVERPASS_TR);
+  assert.equal(m.get('TR-34').length, 2);
+  assert.equal(m.get('TR-45')[0][2], 'Hilal Eczanesi');
+  assert.equal(m.get('TR-34')[1][2], 'Hayat Eczanesi');
+  assert.equal(m.get('TR-34')[1][4], '0 (216) 333 44 55');
+  assert.equal(m.has('TR-XYZ'), false);
+});
+
+await test('OSM: 5+ eski il → tek sorgu, eksikler il il', async () => {
+  const out = mkdtempSync(path.join(os.tmpdir(), 'eczane-osm-'));
+  try {
+    overpassCalls.length = 0;
+    const run = await runNode(['src/run.mjs', '--out', out, '--only', '34,45,6,7,1', '--no-nominatim'], {
+      cwd: root,
+      env: { ...process.env, EDEVLET_DELAY_MS: '0', NOSY_API_KEY: '', OVERPASS_URLS: `${base}/overpass` },
+    });
+    assert.equal(run.status, 0, run.stderr + run.stdout);
+    assert.equal(overpassCalls[0], 'tr');
+    const man = JSON.parse(readFileSync(path.join(out, 'v1/osm/45.json'), 'utf8'));
+    assert.equal(man.rows.length, 1);
+    const ist = JSON.parse(readFileSync(path.join(out, 'v1/osm/34.json'), 'utf8'));
+    assert.equal(ist.rows.length, 2);
+    // Ankara/Antalya/Adana tek sorguda yoktu → il il denendi
+    assert.equal(overpassCalls.filter((c) => c === 'il').length, 3);
+    // Konumsuz nöbetçi Hayat, OSM'deki Hayat ile eşleşip konum almalı
+    const il34 = JSON.parse(readFileSync(path.join(out, 'v1/il/34.json'), 'utf8'));
+    assert.equal(il34.days[0].pharmacies.find((p) => p.name === 'Hayat Eczanesi').lat, 41.02);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
 await test('uçtan uca çalışma (İstanbul + İzmir + boş il)', async () => {
   const out = mkdtempSync(path.join(os.tmpdir(), 'eczane-veri-'));
   try {
@@ -252,7 +310,7 @@ await test('uçtan uca çalışma (İstanbul + İzmir + boş il)', async () => {
     assert.equal(index.provinces.length, 3);
     const esk = index.provinces.find((p) => p.plaka === 26);
     assert.equal(esk.count, 0);
-    assert.ok(readFileSync(path.join(out, 'index.html'), 'utf8').includes('Eczane Pusula'));
+    assert.ok(readFileSync(path.join(out, 'index.html'), 'utf8').includes('Nöbetçi Eczanem'));
 
     // İkinci çalışma: e-Devlet boş dönse bile önceki dolu veri silinmemeli
     process.env.EDEVLET_URL = `${base}/yok`;
