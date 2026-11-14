@@ -82,7 +82,7 @@ export async function resolveCoordinates(province, pharmacies, { geocache, osmRo
       stats.missing++;
       continue;
     }
-    if (budget.nominatimLeft > 0 && p.address) {
+    if (budget.nominatimLeft > 0 && !(budget.deadline && Date.now() > budget.deadline) && p.address) {
       budget.nominatimLeft--;
       try {
         const queries = [

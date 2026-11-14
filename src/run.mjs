@@ -30,9 +30,10 @@ const env = (k, d) => (process.env[k] !== undefined && process.env[k] !== '' ? p
 const EDEVLET_DELAY_MS = Number(env('EDEVLET_DELAY_MS', 1500));
 const NOSY_KEY = env('NOSY_API_KEY', '');
 const NOSY_MAX = Number(env('NOSY_MAX_PER_RUN', 12));
-const OSM_MAX = Number(env('OSM_MAX_PER_RUN', 12));
+const OSM_MAX = Number(env('OSM_MAX_PER_RUN', 81));
+const OSM_BUDGET_MS = Number(env('OSM_BUDGET_MIN', 18)) * 60_000;
 const OSM_MAX_AGE_MS = Number(env('OSM_MAX_AGE_DAYS', 7)) * 86_400_000;
-const NOMINATIM_MAX = NO_NOMINATIM ? 0 : Number(env('NOMINATIM_MAX_PER_RUN', 120));
+const NOMINATIM_MAX = NO_NOMINATIM ? 0 : Number(env('NOMINATIM_MAX_PER_RUN', 400));
 const CONTACT = env('CONTACT_EMAIL', '');
 const REPO = env('GITHUB_REPOSITORY', 'eczane-pusula-veri');
 const GEO_UA = `EczanePusulaVeri/1.0 (+https://github.com/${REPO})${CONTACT ? ` ${CONTACT}` : ''}`;
@@ -130,7 +131,8 @@ async function main() {
 
   const geocacheFile = path.join(OUT, 'cache', 'geocode.json');
   const geocache = await readJson(geocacheFile, {});
-  const budget = { nominatimLeft: NOMINATIM_MAX, nosyLeft: NOSY_KEY ? NOSY_MAX : 0 };
+  // Toplam süre GitHub'ın iş süresi sınırını aşmasın: adres aramaları en geç 55. dakikada durur
+  const budget = { nominatimLeft: NOMINATIM_MAX, nosyLeft: NOSY_KEY ? NOSY_MAX : 0, deadline: Date.now() + 55 * 60_000 };
 
   // 1) OpenStreetMap: eski/eksik illeri yenile (çalışma başına sınırlı)
   const osmData = new Map();
@@ -143,7 +145,12 @@ async function main() {
       .filter((x) => x.age > OSM_MAX_AGE_MS)
       .sort((a, b) => b.age - a.age)
       .slice(0, OSM_MAX);
+    const osmStarted = Date.now();
     for (const { p } of stale) {
+      if (Date.now() - osmStarted > OSM_BUDGET_MS) {
+        log(`OSM: süre doldu, kalan iller sonraki çalışmada.`);
+        break;
+      }
       try {
         const rows = await fetchOsmProvince(p);
         const data = { v: 1, plaka: p.plaka, il: p.name, updatedAt: new Date().toISOString(), attribution: OSM_ATTRIBUTION, rows };

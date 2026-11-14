@@ -68,13 +68,28 @@ export function hashId(text) {
   return h.toString(36);
 }
 
-export function cleanPhone(raw) {
+// Türkiye telefon numarası: (+90) 0 (2xx-5xx) xxx xx xx — ayırıcılar isteğe bağlı.
+// Hücrede nöbet saati/tarihi gibi başka rakamlar da olabilir; yalnızca ilk numarayı alır.
+const PHONE_RE = /(?:\+?\s*90[\s.-]*)?\(?\s*0?\s*\(?\s*([2-5]\d{2})\s*\)?[\s.-]*(\d{3})[\s.-]*(\d{2})[\s.-]*(\d{2})/;
+
+/** Metindeki ilk telefon numarası → "0 (236) 237 10 08"; bulunamazsa undefined. */
+export function extractPhone(raw) {
   const s = cleanSpaces(raw);
   if (!s) return undefined;
-  const digits = s.replace(/\D/g, '');
-  if (digits.length === 10) return `0${digits}`.replace(/^0(\d{3})(\d{3})(\d{2})(\d{2})$/, '0 ($1) $2 $3 $4');
-  if (digits.length === 11 && digits.startsWith('0')) {
-    return digits.replace(/^0(\d{3})(\d{3})(\d{2})(\d{2})$/, '0 ($1) $2 $3 $4');
-  }
-  return s;
+  const m = s.match(PHONE_RE);
+  return m ? `0 (${m[1]}) ${m[2]} ${m[3]} ${m[4]}` : undefined;
+}
+
+export function cleanPhone(raw) {
+  return extractPhone(raw);
+}
+
+/** Büyük harfli adresi okunur yapar; "NO:186/A" gibi kısımları korur. */
+export function prettyAddress(text) {
+  const s = titleCaseTr(text);
+  return s
+    .replace(/([^\s])\.(?=no\s*[:.])/gi, '$1. ')
+    .replace(/\b(no|kat|daire)\s*[:.]\s*/gi, (m, w) => `${w.charAt(0).toUpperCase()}${w.slice(1).toLowerCase()}:`)
+    .replace(/\/\s*([a-zçğıöşü])/g, (m, c) => `/${c.toLocaleUpperCase('tr-TR')}`).replace(/\bMah\b\.?/g, 'Mah.').replace(/\bCad\b\.?/g, 'Cad.').replace(/\bSok\b\.?/g, 'Sok.')
+    .replace(/(\d\s*\/?\s*)([a-zçğıöşü])(?![a-zçğıöşü])/g, (m, a, b) => a + b.toLocaleUpperCase('tr-TR'));
 }
