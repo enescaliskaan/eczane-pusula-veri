@@ -105,9 +105,9 @@ const { parseEdevletResult, findToken, fetchEdevlet } = await import('../src/sou
 const { parseIzmir } = await import('../src/sources/izmir.mjs');
 const { Session } = await import('../src/http.mjs');
 const { extractCoords, parseTables } = await import('../src/html.mjs');
-const { parseTrDateTime, addDays, edevletDate } = await import('../src/time.mjs');
+const { parseTrDateTime, addDays, edevletDate, findDateTimes } = await import('../src/time.mjs');
 const { resolveCoordinates } = await import('../src/coords.mjs');
-const { titleCaseTr, slugTr, cleanPhone } = await import('../src/text.mjs');
+const { titleCaseTr, slugTr, cleanPhone, extractPhone } = await import('../src/text.mjs');
 const { PROVINCES } = await import('../src/provinces.mjs');
 
 await test('81 il, benzersiz slug', () => {
@@ -131,6 +131,23 @@ await test('tarih/saat', () => {
   assert.equal(parseTrDateTime('08:30', '2026-11-13'), '2026-11-13T05:30:00.000Z');
   assert.equal(addDays('2026-12-31', 1), '2027-01-01');
   assert.equal(edevletDate('2026-11-03'), '03/11/2026');
+});
+
+await test('telefon hücresine yapışık nöbet saatleri (Manisa vakası)', () => {
+  assert.equal(extractPhone('0236 237 10 08 18:00 13/11/2026 08:30 14/11/2026'), '0 (236) 237 10 08');
+  assert.equal(extractPhone('02362371008180013112026083014112026'), '0 (236) 237 10 08');
+  assert.equal(extractPhone('+90 (532) 111-22-33'), '0 (532) 111 22 33');
+  assert.equal(extractPhone('yok'), undefined);
+  assert.deepEqual(findDateTimes('18:00 13/11/2026 08:30 14/11/2026'), ['2026-11-13T15:00:00.000Z', '2026-11-14T05:30:00.000Z']);
+  assert.deepEqual(findDateTimes('13.11.2026 18:00 - 14.11.2026 08:30'), ['2026-11-13T15:00:00.000Z', '2026-11-14T05:30:00.000Z']);
+  const html = `<table><thead><tr><th>İlçe</th><th>Eczane Adı</th><th>Adres</th><th>Telefon</th></tr></thead><tbody><tr><td>ŞEHZADELER</td><td>AKDUR</td><td>SEHİTLER MAH. SEHİTLER CAD. NO.46/A</td><td>0236 237 10 08 18:00 13/11/2026 08:30 14/11/2026</td></tr></tbody></table>`;
+  const r = parseEdevletResult(html, { dateKey: '2026-11-13', ilName: 'Manisa' });
+  const p = r.pharmacies[0];
+  assert.equal(p.phone, '0 (236) 237 10 08');
+  assert.equal(p.district, 'Şehzadeler');
+  assert.equal(p.address, 'Sehitler Mah. Sehitler Cad. No:46/A');
+  assert.equal(p.dutyStart, '2026-11-13T15:00:00.000Z');
+  assert.equal(p.dutyEnd, '2026-11-14T05:30:00.000Z');
 });
 
 await test('token bulma', () => {
