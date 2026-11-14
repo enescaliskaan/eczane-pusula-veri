@@ -8,7 +8,7 @@ import { PROVINCES } from './provinces.mjs';
 import { fetchEdevlet } from './sources/edevlet.mjs';
 import { fetchIzmir, IZMIR_ATTRIBUTION } from './sources/izmir.mjs';
 import { fetchNosy } from './sources/nosy.mjs';
-import { fetchOsmProvince, OSM_ATTRIBUTION } from './sources/osm.mjs';
+import { fetchOsmNationwide, fetchOsmProvince, OSM_ATTRIBUTION } from './sources/osm.mjs';
 import { hashId } from './text.mjs';
 import { addDays, sleep, todayKey, trParts } from './time.mjs';
 
@@ -36,7 +36,7 @@ const OSM_MAX_AGE_MS = Number(env('OSM_MAX_AGE_DAYS', 7)) * 86_400_000;
 const NOMINATIM_MAX = NO_NOMINATIM ? 0 : Number(env('NOMINATIM_MAX_PER_RUN', 400));
 const CONTACT = env('CONTACT_EMAIL', '');
 const REPO = env('GITHUB_REPOSITORY', 'eczane-pusula-veri');
-const GEO_UA = `EczanePusulaVeri/1.0 (+https://github.com/${REPO})${CONTACT ? ` ${CONTACT}` : ''}`;
+const GEO_UA = `NobetciEczanemVeri/1.0 (+https://github.com/${REPO})${CONTACT ? ` ${CONTACT}` : ''}`;
 
 const V1 = path.join(OUT, 'v1');
 const log = (...m) => console.log(...m);
@@ -111,9 +111,9 @@ function statusPage(report) {
         }</td><td>${p.note ?? ''}</td></tr>`,
     )
     .join('');
-  return `<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Eczane Pusula Veri</title>
+  return `<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nöbetçi Eczanem Veri</title>
 <style>body{font:14px system-ui,sans-serif;margin:16px;background:#0b0d11;color:#e8eaed}table{border-collapse:collapse;width:100%;max-width:820px}td,th{padding:6px 8px;border-bottom:1px solid #2a2f36;text-align:left}tr.bos td{color:#ff6b75}h1{color:#ff3b4a;font-size:20px}small{color:#9aa4ae}</style></head>
-<body><h1>Eczane Pusula — veri durumu</h1><p><small>Son çalışma: ${report.finishedAt} · Nöbet günü: ${report.dutyDate} · Dolu il: ${
+<body><h1>Nöbetçi Eczanem — veri durumu</h1><p><small>Son çalışma: ${report.finishedAt} · Nöbet günü: ${report.dutyDate} · Dolu il: ${
     report.filled
   }/81</small></p><table><tr><th>Plaka</th><th>İl</th><th>Nöbetçi</th><th>Kaynak</th><th>Not</th></tr>${rows}</table>
 <p><small>Kaynaklar: T.C. Sağlık Bakanlığı TİTCK (e-Devlet), ${IZMIR_ATTRIBUTION}, NosyAPI, ${OSM_ATTRIBUTION}.</small></p></body></html>`;
@@ -146,16 +146,42 @@ async function main() {
       .sort((a, b) => b.age - a.age)
       .slice(0, OSM_MAX);
     const osmStarted = Date.now();
-    for (const { p } of stale) {
+    const saveOsm = async (p, rows) => {
+      const data = { v: 1, plaka: p.plaka, il: p.name, updatedAt: new Date().toISOString(), attribution: OSM_ATTRIBUTION, rows };
+      await writeJson(path.join(V1, 'osm', `${p.code}.json`), data);
+      osmData.set(p.plaka, data);
+    };
+
+    // Çok il eskiyse: 81 il tek sorguda (birkaç dakika)
+    const done = new Set();
+    if (stale.length >= 5) {
+      try {
+        log(`OSM: ${stale.length} il eski, tüm Türkiye tek sorguyla indiriliyor…`);
+        const byIso = await fetchOsmNationwide();
+        let total = 0;
+        for (const { p } of stale) {
+          const rows = byIso.get(p.iso);
+          if (rows && rows.length > 0) {
+            await saveOsm(p, rows);
+            done.add(p.plaka);
+            total += rows.length;
+          }
+        }
+        log(`OSM tüm Türkiye: ${done.size} il, ${total} eczane (${Math.round((Date.now() - osmStarted) / 1000)} sn)`);
+      } catch (e) {
+        log(`OSM tüm Türkiye: HATA ${e.message} — il il denenecek`);
+      }
+    }
+
+    // Kalanlar il il (süre sınırlı)
+    for (const { p } of stale.filter((x) => !done.has(x.p.plaka))) {
       if (Date.now() - osmStarted > OSM_BUDGET_MS) {
         log(`OSM: süre doldu, kalan iller sonraki çalışmada.`);
         break;
       }
       try {
         const rows = await fetchOsmProvince(p);
-        const data = { v: 1, plaka: p.plaka, il: p.name, updatedAt: new Date().toISOString(), attribution: OSM_ATTRIBUTION, rows };
-        await writeJson(path.join(V1, 'osm', `${p.code}.json`), data);
-        osmData.set(p.plaka, data);
+        await saveOsm(p, rows);
         log(`OSM ${p.code} ${p.name}: ${rows.length} eczane`);
       } catch (e) {
         log(`OSM ${p.code} ${p.name}: HATA ${e.message}`);
